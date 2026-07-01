@@ -164,3 +164,115 @@ curl -X POST http://localhost:8000/chat \
 ## Roadmap Goal
 
 Build a full ML/AI Engineer portfolio project covering every skill in an Ottawa ML/AI Engineer job posting — Python, LangChain, RAG, vector databases, FastAPI, Docker, AWS, MLflow, CI/CD, and LangChain Agents.
+
+---
+
+## 8-Week ML/AI Engineer Roadmap
+
+### Week 1 — Python Foundations & Your First RAG App
+**Theme:** Get a working chatbot running locally by end of week.
+
+**What to build:** A simple Q&A chatbot that reads a PDF and answers questions about it.
+
+**Tools:** Python, LangChain (document loaders, text splitters, chains), Ollama (free local LLMs), ChromaDB
+
+**Deliverable:** CLI chatbot that answers questions about any PDF you feed it.
+
+---
+
+### Week 2 — Vector Databases & RAG Deep Dive
+**Theme:** Understand how retrieval actually works under the hood.
+
+**What to build:** Upgrade your chatbot — add multi-document support, conversation history, and source citations.
+
+**Tools:** Embeddings (nomic-embed-text / sentence-transformers), ChromaDB, retrieval strategies (similarity search, MMR, hybrid)
+
+**Key concepts:** Embedding distance, chunking strategies, context window limits
+
+**Deliverable:** Multi-doc chatbot that cites which document/page it used.
+
+---
+
+### Week 3 — Wrap It in an API (Software Engineering Layer)
+**Theme:** Turn your script into a real backend service.
+
+**What to build:** REST API around your RAG chatbot — file upload endpoint + chat endpoint + embedded UI.
+
+**Tools:** FastAPI, Pydantic, uvicorn
+
+**Deliverable:** Working API + chat UI accessible at `localhost:8000`.
+
+---
+
+### Week 4 — Containerize & Add a Frontend
+**Theme:** Package your app so it runs anywhere.
+
+**What to build:** Dockerize the FastAPI app, docker-compose setup with app + vector DB as separate services.
+
+**Tools:** Docker (Dockerfile, layers, multi-stage builds), docker-compose (networking, volumes, env vars), Streamlit or Gradio
+
+**Deliverable:** `docker-compose up` spins up your entire app locally.
+
+---
+
+### Week 5 — MLOps: Experiment Tracking & Model Management
+**Theme:** Start doing ML the professional way.
+
+**What to build:** Fine-tune a small classifier (sentiment or topic tagger), track every run with MLflow.
+
+**Tools:** Scikit-learn / PyTorch (training loops, evaluation metrics), MLflow (experiment tracking, model registry, artifact logging)
+
+**Key concepts:** Train/val/test splits, overfitting, model versioning
+
+**Deliverable:** MLflow dashboard showing 10+ experiment runs with metrics compared.
+
+---
+
+### Week 6 — Cloud Deployment (AWS)
+**Theme:** Put your app on the internet.
+
+**What to build:** Deploy FastAPI to AWS, store PDFs in S3, run MLflow on EC2.
+
+**Tools:** AWS S3, EC2, IAM, ECR, ECS or SageMaker
+
+**Deliverable:** Your chatbot accessible via a public URL.
+
+---
+
+### Week 7 — CI/CD Pipeline & Kubernetes Basics
+**Theme:** Automate testing and deployment like a real engineering team.
+
+**What to build:** GitHub Actions pipeline (push → test → build → deploy), deploy to Kubernetes.
+
+**Tools:** GitHub Actions, pytest, Kubernetes (pods, deployments, services, ingress), minikube or EKS
+
+**Deliverable:** Push a code change → app auto-deploys within minutes, no manual steps.
+
+---
+
+### Week 8 — Agents, Monitoring & Polish
+**Theme:** Add advanced AI features and make it production-ready.
+
+**What to build:** Upgrade chatbot to an agent (web search, database queries, external APIs), add monitoring, write polished docs.
+
+**Tools:** LangChain Agents / LangGraph, Prometheus + Grafana or AWS CloudWatch
+
+**Deliverable:** A polished GitHub repo you'd be proud to show in an interview.
+
+---
+
+## Skills Checklist
+
+| Job Requirement | Where You Learn It |
+|---|---|
+| Python | Week 1 + throughout |
+| PyTorch / Scikit-learn | Week 5 |
+| AWS / Cloud | Week 6 |
+| Docker / Kubernetes | Week 4 + Week 7 |
+| MLflow (MLOps) | Week 5 |
+| CI/CD pipelines | Week 7 |
+| LLMs / RAG / LangChain | Week 1–2 |
+| Vector databases | Week 2 |
+| Agent-based architectures | Week 8 |
+| FastAPI / REST APIs | Week 3 |
+| Model monitoring | Week 8 |
