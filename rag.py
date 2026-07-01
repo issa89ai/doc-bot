@@ -10,8 +10,11 @@ import shutil
 DOCS_DIR = "docs"
 CHROMA_DIR = "./chroma_db"
 
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
-llm = ChatOllama(model="llama3.2")
+# When running in Docker, OLLAMA_HOST points to the host machine's Ollama
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+
+embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_HOST)
+llm = ChatOllama(model="llama3.2", base_url=OLLAMA_HOST)
 
 prompt = ChatPromptTemplate.from_template("""
 You are a helpful assistant. Answer the question based only on the context below.

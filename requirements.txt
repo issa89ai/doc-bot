@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+langchain
+langchain-community
+langchain-chroma
+langchain-ollama
+chromadb
+pypdf

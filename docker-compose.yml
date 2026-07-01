@@ -1,0 +1,14 @@
+services:
+  doc-bot:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docs:/app/docs          # your PDFs persist on your machine
+      - ./chroma_db:/app/chroma_db  # vector store persists on your machine
+    environment:
+      # Points the container to Ollama running on your Windows host
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
