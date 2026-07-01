@@ -1,0 +1,16 @@
+# Vector store (generated, can be rebuilt)
+chroma_db/
+
+# PDFs (your private data)
+*.pdf
+docs/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
