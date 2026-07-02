@@ -56,8 +56,8 @@ experiments = [
     {
         "name": "NaiveBayes",
         "vectorizer": TfidfVectorizer(max_features=10000, ngram_range=(1, 1)),
-        "model": MultinomialNB(alpha=0.1),
-        "params": {"model": "MultinomialNB", "alpha": 0.1, "ngram_range": "1,1", "max_features": 10000},
+        "model": MultinomialNB(alpha=0.5),
+        "params": {"model": "MultinomialNB", "alpha": 0.5, "ngram_range": "1,1", "max_features": 10000},
     },
     {
         "name": "LinearSVC",
