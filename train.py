@@ -116,4 +116,28 @@ df = pd.DataFrame(results).sort_values("accuracy", ascending=False)
 print(df.to_string(index=False))
 best = df.iloc[0]
 print(f"\n  Best model: {best['run']}  (accuracy={best['accuracy']}, f1={best['f1']})")
+
+# ── Alpha tuning runs (NaiveBayes hyperparameter search) ─────────────────────
+print("\nRunning alpha tuning experiment for NaiveBayes...")
+alphas = [0.001, 0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0]
+
+for alpha in alphas:
+    with mlflow.start_run(run_name=f"NaiveBayes-alpha-{alpha}"):
+        pipeline = Pipeline([
+            ("tfidf", TfidfVectorizer(max_features=10000, ngram_range=(1, 1))),
+            ("clf",   MultinomialNB(alpha=alpha)),
+        ])
+        pipeline.fit(X_train, y_train)
+        y_pred = pipeline.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred, average="weighted")
+
+        mlflow.log_params({"model": "MultinomialNB", "alpha": alpha, "experiment_type": "alpha_tuning"})
+        mlflow.log_metric("accuracy", accuracy)
+        mlflow.log_metric("f1_weighted", f1)
+        mlflow.sklearn.log_model(pipeline, artifact_path="model")
+
+        print(f"  alpha={alpha:<6} accuracy={accuracy:.4f}  f1={f1:.4f}")
+
 print("\nRun  'mlflow ui'  then open  http://localhost:5000  to explore all runs.")
+print(f"Total runs logged: {len(experiments) + len(alphas)}")

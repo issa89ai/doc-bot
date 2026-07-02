@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Security, Depends
+from fastapi.security.api_key import APIKeyHeader
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import os
@@ -6,6 +7,14 @@ import shutil
 import uuid
 
 import rag
+
+# ── API Key auth ──────────────────────────────────────────────────────────────
+API_KEY = os.getenv("API_KEY", "docbot-secret-123")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def require_api_key(key: str = Security(api_key_header)):
+    if key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key. Pass it as X-API-Key header.")
 
 os.makedirs(rag.DOCS_DIR, exist_ok=True)
 os.makedirs(rag.CHROMA_DIR, exist_ok=True)
@@ -67,7 +76,7 @@ def ui():
 
 
 @app.post("/upload", response_model=UploadResponse, summary="Upload a PDF to index")
-async def upload(file: UploadFile = File(..., description="A PDF file to index")):
+async def upload(file: UploadFile = File(..., description="A PDF file to index"), _=Depends(require_api_key)):
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
@@ -84,7 +93,7 @@ async def upload(file: UploadFile = File(..., description="A PDF file to index")
 
 
 @app.post("/chat", response_model=ChatResponse, summary="Ask a question about your documents")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, _=Depends(require_api_key)):
     if not req.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
@@ -376,6 +385,7 @@ HTML_UI = """<!DOCTYPE html>
 </div>
 
 <script>
+  const API_KEY = "docbot-secret-123";
   const sessionId = "session_" + Math.random().toString(36).slice(2, 8);
   document.getElementById("session-label").textContent = "Session: " + sessionId;
 
@@ -387,7 +397,7 @@ HTML_UI = """<!DOCTYPE html>
     const fd = new FormData();
     fd.append("file", file);
 
-    const res = await fetch("/upload", { method: "POST", body: fd });
+    const res = await fetch("/upload", { method: "POST", body: fd, headers: { "X-API-Key": API_KEY } });
     const data = await res.json();
 
     if (res.ok) {
@@ -449,7 +459,7 @@ HTML_UI = """<!DOCTYPE html>
 
     const res = await fetch("/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-API-Key": API_KEY },
       body: JSON.stringify({ question, session_id: sessionId }),
     });
 
