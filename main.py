@@ -2,11 +2,23 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Security, Depends
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from dotenv import load_dotenv
+import boto3
 import os
 import shutil
-import uuid
+
+load_dotenv()
 
 import rag
+
+# ── S3 client ─────────────────────────────────────────────────────────────────
+S3_BUCKET = os.getenv("S3_BUCKET")
+s3 = boto3.client(
+    "s3",
+    region_name=os.getenv("AWS_REGION", "us-east-2"),
+    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+)
 
 # ── API Key auth ──────────────────────────────────────────────────────────────
 API_KEY = os.getenv("API_KEY", "docbot-secret-123")
@@ -83,6 +95,13 @@ async def upload(file: UploadFile = File(..., description="A PDF file to index")
     save_path = os.path.join(rag.DOCS_DIR, file.filename)
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
+
+    # Upload to S3 for persistent cloud storage
+    if S3_BUCKET:
+        try:
+            s3.upload_file(save_path, S3_BUCKET, f"pdfs/{file.filename}")
+        except Exception as e:
+            print(f"S3 upload warning: {e}")
 
     chunks = rag.load_and_index(save_path)
     return UploadResponse(
