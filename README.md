@@ -128,6 +128,27 @@ curl -X POST http://localhost:8000/chat \
 - Source citations now show filename + page number
 - **Deliverable:** Upgraded CLI chatbot with multi-doc and memory
 
+### ✅ Week 4 — Docker + Container Deployment
+- Multi-stage Dockerfile (builder → slim runtime)
+- `docker-compose.yml` with volume mounts for docs and chroma_db
+- `OLLAMA_HOST` env var bridges Docker container → host Ollama
+- **Deliverable:** `docker-compose up` spins up the entire app locally
+
+### ✅ Week 5 — MLOps & Experiment Tracking
+- Trained a 4-class topic classifier on 20 Newsgroups dataset (sci.med, sci.space, rec.sport.hockey, talk.politics.guns)
+- 6 model runs: LogisticRegression (C=0.1, C=1.0, bigrams), NaiveBayes, LinearSVC (unigrams + bigrams)
+- 8 alpha-tuning runs for NaiveBayes (alpha: 0.001 → 5.0) — 14 MLflow runs total
+- Best model: NaiveBayes alpha=0.5 → accuracy=91.26%
+- **Deliverable:** MLflow dashboard at `http://localhost:5000` with 14 runs and metric charts
+
+### ✅ Week 6 — Cloud Deployment (AWS)
+- S3 bucket `doc-bot-pdfs-ahmadissa` (us-east-2) — every uploaded PDF is stored in the cloud
+- IAM user `doc-bot-app` with scoped S3 access
+- EC2 t3.micro instance (Amazon Linux 2023, us-east-2) running Docker
+- App deployed via `docker run` on EC2 — publicly accessible
+- **Live URL:** http://18.191.243.133:8000
+- **Deliverable:** Doc-Bot accessible from any browser in the world
+
 ### ✅ Week 3 — REST API & Chat UI
 - Extracted RAG logic into `rag.py` (shared by API and CLI)
 - FastAPI backend with 5 clean endpoints
@@ -135,20 +156,6 @@ curl -X POST http://localhost:8000/chat \
 - Embedded dark-themed chat UI — drag & drop upload, real-time chat
 - Auto-generated Swagger docs at `/docs`
 - **Deliverable:** `python -m uvicorn main:app --reload` → open `localhost:8000`
-
-### 🔜 Week 4 — Docker + Frontend Polish
-- Dockerize the FastAPI app
-- `docker-compose up` spins everything up in one command
-- No more manual `uvicorn` commands
-
-### 🔜 Week 5 — MLOps & Experiment Tracking
-- Fine-tune a classifier with PyTorch / Scikit-learn
-- Track experiments with MLflow
-
-### 🔜 Week 6 — Cloud Deployment (AWS)
-- Deploy to AWS (ECS or EC2)
-- PDFs stored in S3
-- Public URL — no local server needed
 
 ### 🔜 Week 7 — CI/CD + Kubernetes
 - GitHub Actions pipeline: push → test → deploy automatically
