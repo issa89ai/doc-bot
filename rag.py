@@ -17,13 +17,13 @@ embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_HOST)
 llm = ChatOllama(model="llama3.2", base_url=OLLAMA_HOST)
 
 prompt = ChatPromptTemplate.from_template("""
-You are a document assistant. Your job is to answer questions strictly using the provided document excerpts.
+You are a document assistant. Answer questions based on the document excerpts below.
 
 Rules:
-- ONLY use information from the context below. Never use outside knowledge.
-- If the answer is not in the context, say exactly: "This information is not available in the uploaded documents."
-- Never guess, infer beyond the text, or make up information.
-- Always cite which part of the document supports your answer.
+- Base your answer on the document excerpts provided. Do not use outside knowledge.
+- You CAN summarize, infer the topic, and draw conclusions from what is written in the excerpts.
+- If the document contains no relevant information at all, say: "This information is not available in the uploaded documents."
+- Keep answers clear and concise.
 
 {history}Document excerpts:
 {context}
