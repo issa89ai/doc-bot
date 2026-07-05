@@ -1,0 +1,28 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd doc-bot
+            git pull origin main
+            sudo docker stop doc-bot || true
+            sudo docker rm doc-bot || true
+            sudo docker build -t doc-bot .
+            sudo docker run -d --name doc-bot --restart always -p 8000:8000 \
+              --env-file .env \
+              -v $(pwd)/docs:/app/docs \
+              -v $(pwd)/chroma_db:/app/chroma_db \
+              doc-bot
