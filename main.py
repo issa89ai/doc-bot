@@ -396,6 +396,22 @@ HTML_UI = """<!DOCTYPE html>
   #send-btn:hover { background: #6070e0; }
   #send-btn:disabled { background: #333; cursor: not-allowed; }
 
+  #demo-banner {
+    background: #1e1a2e;
+    border-bottom: 1px solid #3a2d5a;
+    color: #aaa;
+    font-size: 0.78rem;
+    padding: 10px 20px;
+    line-height: 1.6;
+  }
+  #demo-banner code {
+    background: #2a2540;
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: #c0a8ff;
+    font-size: 0.76rem;
+  }
+
   ::-webkit-scrollbar { width: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 4px; }
@@ -438,6 +454,13 @@ HTML_UI = """<!DOCTYPE html>
 
 <!-- Main -->
 <div id="main">
+  <div id="demo-banner">
+    ⚠️ <strong>Demo notice:</strong> This is a portfolio project running on a free AWS server (1GB RAM).
+    The AI chat requires a 4GB+ server to run. To try the full app locally:
+    clone the <a href="https://github.com/issa89ai/doc-bot" target="_blank" style="color:#7c8cf8">GitHub repo</a>,
+    install <a href="https://ollama.ai" target="_blank" style="color:#7c8cf8">Ollama</a>, and run <code>uvicorn main:app</code>.
+  </div>
+
   <div id="chat-header">
     <h2>Chat</h2>
     <span id="session-label">Session: default</span>
