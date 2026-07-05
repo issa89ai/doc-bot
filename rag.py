@@ -17,14 +17,20 @@ embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_HOST)
 llm = ChatOllama(model="llama3.2", base_url=OLLAMA_HOST)
 
 prompt = ChatPromptTemplate.from_template("""
-You are a helpful assistant. Answer the question based only on the context below.
-If you don't know, say "I don't have enough information."
+You are a document assistant. Your job is to answer questions strictly using the provided document excerpts.
 
-{history}Context:
+Rules:
+- ONLY use information from the context below. Never use outside knowledge.
+- If the answer is not in the context, say exactly: "This information is not available in the uploaded documents."
+- Never guess, infer beyond the text, or make up information.
+- Always cite which part of the document supports your answer.
+
+{history}Document excerpts:
 {context}
 
 Question: {question}
-""")
+
+Answer:""")
 
 
 def load_and_index(pdf_path: str) -> int:

@@ -6,10 +6,21 @@ from dotenv import load_dotenv
 import boto3
 import os
 import shutil
+import time
+import logging
+from datetime import datetime, timezone
 
 load_dotenv()
 
 import rag
+
+logging.basicConfig(
+    filename="requests.log",
+    level=logging.INFO,
+    format="%(message)s"
+)
+
+metrics = {"total_questions": 0, "total_response_time": 0.0, "errors": 0}
 
 # ── S3 client ─────────────────────────────────────────────────────────────────
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -117,11 +128,25 @@ def chat(req: ChatRequest, _=Depends(require_api_key)):
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     history = sessions.get(req.session_id, [])
+    start = time.time()
 
     try:
         reply, sources = rag.answer(req.question, history)
     except Exception as e:
+        metrics["errors"] += 1
         raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
+
+    elapsed = round(time.time() - start, 2)
+    metrics["total_questions"] += 1
+    metrics["total_response_time"] += elapsed
+
+    logging.info({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "question": req.question,
+        "sources": sources,
+        "response_time_s": elapsed,
+        "session": req.session_id,
+    })
 
     history.append((req.question, reply))
     sessions[req.session_id] = history
@@ -132,6 +157,17 @@ def chat(req: ChatRequest, _=Depends(require_api_key)):
         session_id=req.session_id,
         turn=len(history),
     )
+
+
+@app.get("/metrics", summary="Usage metrics")
+def get_metrics():
+    total = metrics["total_questions"]
+    avg = round(metrics["total_response_time"] / total, 2) if total else 0
+    return {
+        "total_questions": total,
+        "average_response_time_s": avg,
+        "errors": metrics["errors"],
+    }
 
 
 @app.get("/documents", response_model=DocumentsResponse, summary="List indexed documents")
