@@ -81,6 +81,17 @@ def get_sources(docs) -> list[str]:
     return seen
 
 
+def delete_document(filename: str):
+    """Remove a document's chunks from the vector store and delete the file."""
+    vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
+    existing = vectorstore.get(where={"source_file": filename})
+    if existing["ids"]:
+        vectorstore.delete(ids=existing["ids"])
+    file_path = os.path.join(DOCS_DIR, filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+
+
 def list_indexed_files() -> list[str]:
     return sorted([
         os.path.basename(f)

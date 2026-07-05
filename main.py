@@ -178,6 +178,12 @@ def documents():
     return DocumentsResponse(documents=files, count=len(files))
 
 
+@app.delete("/documents/{filename}", summary="Delete a document")
+def delete_document(filename: str, _=Depends(require_api_key)):
+    rag.delete_document(filename)
+    return {"message": f"'{filename}' deleted.", "filename": filename}
+
+
 @app.delete("/session/{session_id}", response_model=ClearResponse, summary="Clear conversation history")
 def clear_session(session_id: str):
     sessions.pop(session_id, None)
@@ -523,11 +529,21 @@ HTML_UI = """<!DOCTYPE html>
     const container = document.getElementById("doc-items");
     container.innerHTML = data.documents.length
       ? data.documents.map(d => `
-          <label class="doc-item">
+          <div class="doc-item">
             <input type="checkbox" value="${d}" checked style="margin-right:6px;accent-color:#7c8cf8"/>
-            📄 ${d}
-          </label>`).join("")
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${d}</span>
+            <button onclick="deleteDoc('${d}')" title="Delete" style="background:none;border:none;color:#555;cursor:pointer;font-size:0.85rem;padding:0 2px;flex-shrink:0">🗑</button>
+          </div>`).join("")
       : `<p style="color:#444; font-size:0.78rem;">No documents yet</p>`;
+  }
+
+  async function deleteDoc(filename) {
+    if (!confirm("Delete " + filename + "?")) return;
+    await fetch("/documents/" + encodeURIComponent(filename), {
+      method: "DELETE",
+      headers: { "X-API-Key": API_KEY }
+    });
+    loadDocs();
   }
 
   function getSelectedDocs() {
