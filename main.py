@@ -258,6 +258,17 @@ HTML_UI = """<!DOCTYPE html>
     word-break: break-all;
   }
 
+  #metrics-panel { border-top: 1px solid #2a2d3a; padding-top: 12px; }
+  #metrics-panel h3 { font-size: 0.72rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    padding: 3px 0;
+    color: #888;
+  }
+  .metric-row span { color: #7c8cf8; font-weight: 600; }
+
   .btn-ghost {
     background: none;
     border: 1px solid #2a2d3a;
@@ -415,6 +426,13 @@ HTML_UI = """<!DOCTYPE html>
     <div id="doc-items"></div>
   </div>
 
+  <div id="metrics-panel">
+    <h3>Usage Stats</h3>
+    <div class="metric-row">Questions asked <span id="m-questions">—</span></div>
+    <div class="metric-row">Avg response time <span id="m-avg">—</span></div>
+    <div class="metric-row">Errors <span id="m-errors">—</span></div>
+  </div>
+
   <button class="btn-ghost" onclick="clearSession()">🗑 Clear conversation</button>
 </div>
 
@@ -539,7 +557,17 @@ HTML_UI = """<!DOCTYPE html>
       </div>`;
   }
 
+  async function loadMetrics() {
+    const res = await fetch("/metrics");
+    const d = await res.json();
+    document.getElementById("m-questions").textContent = d.total_questions;
+    document.getElementById("m-avg").textContent = d.average_response_time_s + "s";
+    document.getElementById("m-errors").textContent = d.errors;
+  }
+
   loadDocs();
+  loadMetrics();
+  setInterval(loadMetrics, 10000);
 </script>
 </body>
 </html>
