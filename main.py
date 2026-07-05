@@ -57,12 +57,14 @@ sessions: dict[str, list[tuple[str, str]]] = {}
 class ChatRequest(BaseModel):
     question: str
     session_id: str = "default"
+    selected_docs: list[str] = []
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "question": "What are the main topics in this document?",
-                "session_id": "default"
+                "session_id": "default",
+                "selected_docs": []
             }
         }
     }
@@ -131,7 +133,7 @@ def chat(req: ChatRequest, _=Depends(require_api_key)):
     start = time.time()
 
     try:
-        reply, sources = rag.answer(req.question, history)
+        reply, sources = rag.answer(req.question, history, req.selected_docs)
     except Exception as e:
         metrics["errors"] += 1
         raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
@@ -249,6 +251,8 @@ HTML_UI = """<!DOCTYPE html>
   #doc-list { flex: 1; overflow-y: auto; }
   #doc-list h3 { font-size: 0.72rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
   .doc-item {
+    display: flex;
+    align-items: center;
     font-size: 0.8rem;
     padding: 6px 8px;
     border-radius: 6px;
@@ -256,7 +260,9 @@ HTML_UI = """<!DOCTYPE html>
     margin-bottom: 4px;
     color: #aab;
     word-break: break-all;
+    cursor: pointer;
   }
+  .doc-item:hover { background: #2a2e45; }
 
   #metrics-panel { border-top: 1px solid #2a2d3a; padding-top: 12px; }
   #metrics-panel h3 { font-size: 0.72rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
@@ -516,8 +522,16 @@ HTML_UI = """<!DOCTYPE html>
     const data = await res.json();
     const container = document.getElementById("doc-items");
     container.innerHTML = data.documents.length
-      ? data.documents.map(d => `<div class="doc-item">📄 ${d}</div>`).join("")
+      ? data.documents.map(d => `
+          <label class="doc-item">
+            <input type="checkbox" value="${d}" checked style="margin-right:6px;accent-color:#7c8cf8"/>
+            📄 ${d}
+          </label>`).join("")
       : `<p style="color:#444; font-size:0.78rem;">No documents yet</p>`;
+  }
+
+  function getSelectedDocs() {
+    return [...document.querySelectorAll("#doc-items input:checked")].map(cb => cb.value);
   }
 
   function addMessage(role, text, sources) {
@@ -556,7 +570,7 @@ HTML_UI = """<!DOCTYPE html>
     const res = await fetch("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": API_KEY },
-      body: JSON.stringify({ question, session_id: sessionId }),
+      body: JSON.stringify({ question, session_id: sessionId, selected_docs: getSelectedDocs() }),
     });
 
     thinking.remove();

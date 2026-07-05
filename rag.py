@@ -48,12 +48,12 @@ def load_and_index(pdf_path: str) -> int:
     return len(chunks)
 
 
-def get_retriever():
+def get_retriever(selected_docs: list[str] = []):
     vectorstore = Chroma(persist_directory=CHROMA_DIR, embedding_function=embeddings)
-    return vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 6, "fetch_k": 20}
-    )
+    kwargs = {"k": 6, "fetch_k": 20}
+    if selected_docs:
+        kwargs["filter"] = {"source_file": {"$in": selected_docs}}
+    return vectorstore.as_retriever(search_type="mmr", search_kwargs=kwargs)
 
 
 def format_docs(docs) -> str:
@@ -88,9 +88,9 @@ def list_indexed_files() -> list[str]:
     ])
 
 
-def answer(question: str, history: list[tuple[str, str]]) -> tuple[str, list[str]]:
+def answer(question: str, history: list[tuple[str, str]], selected_docs: list[str] = []) -> tuple[str, list[str]]:
     """Returns (answer_text, sources_list)."""
-    retriever = get_retriever()
+    retriever = get_retriever(selected_docs)
     docs = retriever.invoke(question)
     sources = get_sources(docs)
 
