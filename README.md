@@ -146,7 +146,7 @@ curl -X POST http://localhost:8000/chat \
 - IAM user `doc-bot-app` with scoped S3 access
 - EC2 t3.micro instance (Amazon Linux 2023, us-east-2) running Docker
 - App deployed via `docker run` on EC2 — publicly accessible
-- **Live URL:** http://18.191.243.133:8000
+- **Live URL:** http://18.227.122.170:8000 (Elastic IP — permanent)
 - **Deliverable:** Doc-Bot accessible from any browser in the world
 
 ### ✅ Week 3 — REST API & Chat UI
