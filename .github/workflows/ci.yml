@@ -1,0 +1,17 @@
+name: Test and build
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install fastapi python-dotenv python-multipart langchain-core -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: docker build -t doc-bot:ci .
+# Deployment intentionally disabled until exposed credentials are replaced,
+# HTTPS is configured, and a reachable Ollama service is verified.

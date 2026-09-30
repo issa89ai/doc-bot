@@ -7,6 +7,9 @@ services:
       - ./docs:/app/docs          # your PDFs persist on your machine
       - ./chroma_db:/app/chroma_db  # vector store persists on your machine
     environment:
+      - API_KEY=${API_KEY:?Set a random API_KEY of at least 32 characters in .env}
+      - S3_BUCKET=${S3_BUCKET:-}
+      - AWS_REGION=${AWS_REGION:-us-east-2}
       # Points the container to Ollama running on your Windows host
       - OLLAMA_HOST=http://host.docker.internal:11434
     extra_hosts:

@@ -10,6 +10,18 @@ __pycache__/
 *.py[cod]
 venv/
 .env
+.env.*
+!.env.example
+mlflow.db*
+mlruns/
+mlartifacts/
+*.log
+.claude/
+.pytest_cache/
+.venv/
+tmp/
+*.pem
+*.key
 
 # OS
 .DS_Store

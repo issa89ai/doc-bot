@@ -1,627 +1,217 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Security, Depends
-from fastapi.security.api_key import APIKeyHeader
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
-from dotenv import load_dotenv
-import boto3
-import os
-import shutil
-import time
+"""Single-owner API. Use one worker with the embedded Chroma store."""
+from collections import OrderedDict
+from contextlib import asynccontextmanager
+from pathlib import Path
 import logging
-from datetime import datetime, timezone
+import os
+import secrets
+import tempfile
+import threading
+import time
+import traceback
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, HTTPException, Security, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.security import APIKeyHeader
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 load_dotenv()
-
 import rag
+from storage import backup_pdf, delete_backup
 
-logging.basicConfig(
-    filename="requests.log",
-    level=logging.INFO,
-    format="%(message)s"
-)
-
+ROOT = Path(__file__).resolve().parent
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+logger = logging.getLogger(__name__)
+lock = threading.RLock()
+sessions = OrderedDict()
 metrics = {"total_questions": 0, "total_response_time": 0.0, "errors": 0}
 
-# ── S3 client ─────────────────────────────────────────────────────────────────
-S3_BUCKET = os.getenv("S3_BUCKET")
-s3 = boto3.client(
-    "s3",
-    region_name=os.getenv("AWS_REGION", "us-east-2"),
-    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-)
 
-# ── API Key auth ──────────────────────────────────────────────────────────────
-API_KEY = os.getenv("API_KEY", "docbot-secret-123")
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-def require_api_key(key: str = Security(api_key_header)):
-    if key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key. Pass it as X-API-Key header.")
-
-os.makedirs(rag.DOCS_DIR, exist_ok=True)
-os.makedirs(rag.CHROMA_DIR, exist_ok=True)
-
-app = FastAPI(
-    title="Doc-Bot API",
-    description="Upload PDFs and chat with them using local LLMs.",
-    version="2.0.0",
-)
-
-# In-memory session store: session_id → list of (question, answer) tuples
-sessions: dict[str, list[tuple[str, str]]] = {}
+def configured_key():
+    key = os.getenv("API_KEY", "")
+    if len(key) < 32 or key == "docbot-secret-123":
+        raise RuntimeError("Set API_KEY to a random secret of at least 32 characters.")
+    return key
 
 
-# ── Pydantic models ───────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app):
+    configured_key()
+    Path(rag.DOCS_DIR).mkdir(parents=True, exist_ok=True)
+    yield
+
+
+app = FastAPI(title="Doc-Bot", version="3.0.0", lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_api_key(key: str | None = Security(key_header)):
+    if not secrets.compare_digest((key or "").encode(), configured_key().encode()):
+        raise HTTPException(401, "Invalid or missing API key.")
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    from fastapi.responses import JSONResponse
+    # Authenticate before multipart parsing/spooling for private API routes.
+    if request.url.path in {"/upload", "/chat", "/documents", "/metrics", "/ready"} or request.url.path.startswith(("/documents/", "/session/")):
+        try:
+            require_api_key(request.headers.get("X-API-Key"))
+        except HTTPException as exc:
+            return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    length = request.headers.get("content-length")
+    if request.url.path == "/upload" and length:
+        try:
+            if int(length) > MAX_UPLOAD_BYTES + 65536:
+                return JSONResponse({"detail": "Maximum PDF size is 10 MB."}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid content length."}, status_code=400)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    return response
+
 
 class ChatRequest(BaseModel):
-    question: str
-    session_id: str = "default"
-    selected_docs: list[str] = []
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "question": "What are the main topics in this document?",
-                "session_id": "default",
-                "selected_docs": []
-            }
-        }
-    }
+    question: str = Field(min_length=1, max_length=4000)
+    session_id: str = Field(min_length=1, max_length=100)
+    selected_docs: list[str] | None = Field(default=None, max_length=100)
 
 
-class ChatResponse(BaseModel):
-    answer: str
-    sources: list[str]
-    session_id: str
-    turn: int
-
-
-class UploadResponse(BaseModel):
-    message: str
-    filename: str
-    chunks_indexed: int
-
-
-class DocumentsResponse(BaseModel):
-    documents: list[str]
-    count: int
-
-
-class ClearResponse(BaseModel):
-    message: str
-    session_id: str
-
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-def ui():
-    return HTML_UI
-
-
-@app.post("/upload", response_model=UploadResponse, summary="Upload a PDF to index")
-async def upload(file: UploadFile = File(..., description="A PDF file to index"), _=Depends(require_api_key)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
-
-    save_path = os.path.join(rag.DOCS_DIR, file.filename)
-    with open(save_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    # Upload to S3 for persistent cloud storage
-    if S3_BUCKET:
-        try:
-            s3.upload_file(save_path, S3_BUCKET, f"pdfs/{file.filename}")
-        except Exception as e:
-            print(f"S3 upload warning: {e}")
-
-    chunks = rag.load_and_index(save_path)
-    return UploadResponse(
-        message=f"'{file.filename}' indexed successfully.",
-        filename=file.filename,
-        chunks_indexed=chunks,
-    )
-
-
-@app.post("/chat", response_model=ChatResponse, summary="Ask a question about your documents")
-def chat(req: ChatRequest, _=Depends(require_api_key)):
-    if not req.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-
-    history = sessions.get(req.session_id, [])
-    start = time.time()
-
+def checked_filename(filename):
     try:
-        reply, sources = rag.answer(req.question, history, req.selected_docs)
-    except Exception as e:
-        metrics["errors"] += 1
-        raise HTTPException(status_code=500, detail=f"RAG error: {str(e)}")
-
-    elapsed = round(time.time() - start, 2)
-    metrics["total_questions"] += 1
-    metrics["total_response_time"] += elapsed
-
-    logging.info({
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "question": req.question,
-        "sources": sources,
-        "response_time_s": elapsed,
-        "session": req.session_id,
-    })
-
-    history.append((req.question, reply))
-    sessions[req.session_id] = history
-
-    return ChatResponse(
-        answer=reply,
-        sources=sources,
-        session_id=req.session_id,
-        turn=len(history),
-    )
+        return rag.validate_filename(filename)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
-@app.get("/metrics", summary="Usage metrics")
-def get_metrics():
-    total = metrics["total_questions"]
-    avg = round(metrics["total_response_time"] / total, 2) if total else 0
-    return {
-        "total_questions": total,
-        "average_response_time_s": avg,
-        "errors": metrics["errors"],
-    }
+@app.get("/", include_in_schema=False)
+def ui():
+    return FileResponse(ROOT / "static" / "index.html")
 
 
-@app.get("/documents", response_model=DocumentsResponse, summary="List indexed documents")
-def documents():
-    files = rag.list_indexed_files()
-    return DocumentsResponse(documents=files, count=len(files))
-
-
-@app.delete("/documents/{filename}", summary="Delete a document")
-def delete_document(filename: str, _=Depends(require_api_key)):
-    rag.delete_document(filename)
-    return {"message": f"'{filename}' deleted.", "filename": filename}
-
-
-@app.delete("/session/{session_id}", response_model=ClearResponse, summary="Clear conversation history")
-def clear_session(session_id: str):
-    sessions.pop(session_id, None)
-    return ClearResponse(message="Session cleared.", session_id=session_id)
-
-
-@app.get("/health", summary="Health check")
+@app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok"}  # Liveness only.
 
 
-# ── Embedded HTML UI ──────────────────────────────────────────────────────────
+@app.get("/ready", dependencies=[Depends(require_api_key)])
+def ready():
+    try:
+        rag.check_ready()
+    except Exception:
+        raise HTTPException(503, "AI dependencies unavailable. Check Ollama and both models.")
+    return {"status": "ready"}
 
-HTML_UI = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Doc-Bot</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background: #0f1117;
-    color: #e0e0e0;
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
+@app.post("/upload", dependencies=[Depends(require_api_key)])
+def upload(file: UploadFile = File(...)):
+    filename = checked_filename(file.filename)
+    temp_path = None
+    stage = "temporary file"
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as target:
+            temp_path = Path(target.name)
+            size = 0
+            while chunk := file.file.read(65536):
+                if size == 0 and not chunk.startswith(b"%PDF-"):
+                    raise HTTPException(400, "File must contain a PDF.")
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "Maximum PDF size is 10 MB.")
+                target.write(chunk)
+            if size == 0:
+                raise HTTPException(400, "The PDF is empty.")
+        with lock:
+            stage = "PDF indexing"
+            chunks = rag.load_and_index(str(temp_path), filename)
+            try:
+                backup = backup_pdf(str(temp_path), filename)
+            except Exception:
+                logger.warning("S3 backup failed; local indexing succeeded.")
+                backup = "failed"
+        return {"filename": filename, "chunks_indexed": chunks, "backup_status": backup,
+                "message": "Document indexed."}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        # Exception messages/locals may contain document text or credentials.
+        # Log only the exception type and code locations, never their values.
+        locations = " -> ".join(
+            f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}"
+            for frame in traceback.extract_tb(exc.__traceback__)
+        )
+        logger.error("Upload failed at %s [%s]; code path: %s",
+                     stage, type(exc).__name__, locations)
+        raise HTTPException(503, "Could not index PDF. Check PDF validity and Ollama availability.")
+    finally:
+        file.file.close()
+        if temp_path:
+            temp_path.unlink(missing_ok=True)
 
-  /* ── Sidebar ── */
-  #sidebar {
-    width: 260px;
-    background: #1a1d27;
-    border-right: 1px solid #2a2d3a;
-    display: flex;
-    flex-direction: column;
-    padding: 20px 16px;
-    gap: 16px;
-    flex-shrink: 0;
-  }
 
-  #sidebar h1 { font-size: 1.2rem; color: #7c8cf8; font-weight: 700; }
-  #sidebar p  { font-size: 0.75rem; color: #666; }
+@app.post("/chat", dependencies=[Depends(require_api_key)])
+def chat(req: ChatRequest):
+    if not req.question.strip():
+        raise HTTPException(400, "Question cannot be empty.")
+    if req.selected_docs == []:
+        raise HTTPException(400, "Select at least one document.")
+    with lock:
+        history, turns = sessions.get(req.session_id, ([], 0))
+        start = time.monotonic()
+        try:
+            reply, sources = rag.answer(req.question, history, req.selected_docs)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception:
+            metrics["errors"] += 1
+            raise HTTPException(503, "AI service unavailable. Check Ollama and installed models.")
+        metrics["total_questions"] += 1
+        metrics["total_response_time"] += time.monotonic() - start
+        sessions[req.session_id] = ((history + [(req.question, reply)])[-3:], turns + 1)
+        sessions.move_to_end(req.session_id)
+        while len(sessions) > 100:
+            sessions.popitem(last=False)
+    return {"answer": reply, "sources": sources, "session_id": req.session_id, "turn": turns + 1}
 
-  #upload-area {
-    border: 2px dashed #2a2d3a;
-    border-radius: 10px;
-    padding: 20px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
-    font-size: 0.82rem;
-    color: #888;
-  }
-  #upload-area:hover, #upload-area.drag-over {
-    border-color: #7c8cf8;
-    background: #1e2235;
-    color: #aab;
-  }
-  #upload-area span { display: block; font-size: 1.6rem; margin-bottom: 6px; }
-  #file-input { display: none; }
 
-  #upload-status {
-    font-size: 0.78rem;
-    min-height: 18px;
-    color: #7c8cf8;
-  }
+@app.get("/documents", dependencies=[Depends(require_api_key)])
+def documents():
+    with lock:
+        files = rag.list_indexed_files()
+    return {"documents": files, "count": len(files)}
 
-  #doc-list { flex: 1; overflow-y: auto; }
-  #doc-list h3 { font-size: 0.72rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-  .doc-item {
-    display: flex;
-    align-items: center;
-    font-size: 0.8rem;
-    padding: 6px 8px;
-    border-radius: 6px;
-    background: #22253a;
-    margin-bottom: 4px;
-    color: #aab;
-    word-break: break-all;
-    cursor: pointer;
-  }
-  .doc-item:hover { background: #2a2e45; }
 
-  #metrics-panel { border-top: 1px solid #2a2d3a; padding-top: 12px; }
-  #metrics-panel h3 { font-size: 0.72rem; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-  .metric-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.78rem;
-    padding: 3px 0;
-    color: #888;
-  }
-  .metric-row span { color: #7c8cf8; font-weight: 600; }
+@app.delete("/documents/{filename}", dependencies=[Depends(require_api_key)])
+def delete_document(filename: str):
+    filename = checked_filename(filename)
+    with lock:
+        try:
+            delete_backup(filename)
+        except Exception:
+            raise HTTPException(503, "Cloud deletion failed. Document retained locally; retry.")
+        rag.delete_document(filename)
+        sessions.clear()
+    return {"message": "Document deleted.", "filename": filename}
 
-  .btn-ghost {
-    background: none;
-    border: 1px solid #2a2d3a;
-    color: #777;
-    border-radius: 6px;
-    padding: 6px 10px;
-    font-size: 0.78rem;
-    cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
-  }
-  .btn-ghost:hover { border-color: #7c8cf8; color: #7c8cf8; }
 
-  /* ── Main chat area ── */
-  #main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+@app.delete("/session/{session_id}", dependencies=[Depends(require_api_key)])
+def clear_session(session_id: str):
+    with lock:
+        sessions.pop(session_id, None)
+    return {"message": "Conversation cleared."}
 
-  #chat-header {
-    padding: 14px 24px;
-    border-bottom: 1px solid #1e2130;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #0f1117;
-  }
-  #chat-header h2 { font-size: 0.95rem; color: #ccc; font-weight: 500; }
-  #session-label { font-size: 0.75rem; color: #555; }
 
-  #messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .msg {
-    max-width: 75%;
-    padding: 12px 16px;
-    border-radius: 14px;
-    font-size: 0.88rem;
-    line-height: 1.6;
-    white-space: pre-wrap;
-  }
-  .msg.user {
-    align-self: flex-end;
-    background: #7c8cf8;
-    color: #fff;
-    border-bottom-right-radius: 4px;
-  }
-  .msg.bot {
-    align-self: flex-start;
-    background: #1a1d27;
-    color: #dde;
-    border-bottom-left-radius: 4px;
-  }
-  .msg .sources {
-    margin-top: 8px;
-    font-size: 0.75rem;
-    color: #7c8cf8;
-    opacity: 0.8;
-  }
-
-  .msg.thinking {
-    align-self: flex-start;
-    background: #1a1d27;
-    color: #555;
-    font-style: italic;
-    font-size: 0.82rem;
-  }
-
-  #empty-state {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: #333;
-    gap: 8px;
-    pointer-events: none;
-  }
-  #empty-state span { font-size: 2.5rem; }
-  #empty-state p { font-size: 0.9rem; }
-
-  /* ── Input bar ── */
-  #input-bar {
-    padding: 16px 24px;
-    border-top: 1px solid #1e2130;
-    display: flex;
-    gap: 10px;
-    background: #0f1117;
-  }
-
-  #question-input {
-    flex: 1;
-    background: #1a1d27;
-    border: 1px solid #2a2d3a;
-    border-radius: 10px;
-    color: #e0e0e0;
-    padding: 12px 16px;
-    font-size: 0.9rem;
-    outline: none;
-    transition: border-color 0.2s;
-    resize: none;
-    height: 48px;
-    font-family: inherit;
-  }
-  #question-input:focus { border-color: #7c8cf8; }
-
-  #send-btn {
-    background: #7c8cf8;
-    border: none;
-    border-radius: 10px;
-    color: #fff;
-    padding: 0 20px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: background 0.2s;
-    height: 48px;
-  }
-  #send-btn:hover { background: #6070e0; }
-  #send-btn:disabled { background: #333; cursor: not-allowed; }
-
-  #demo-banner {
-    background: #1e1a2e;
-    border-bottom: 1px solid #3a2d5a;
-    color: #aaa;
-    font-size: 0.78rem;
-    padding: 10px 20px;
-    line-height: 1.6;
-  }
-  #demo-banner code {
-    background: #2a2540;
-    padding: 1px 6px;
-    border-radius: 4px;
-    color: #c0a8ff;
-    font-size: 0.76rem;
-  }
-
-  ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 4px; }
-</style>
-</head>
-<body>
-
-<!-- Sidebar -->
-<div id="sidebar">
-  <div>
-    <h1>🤖 Doc-Bot</h1>
-    <p>Chat with your documents</p>
-  </div>
-
-  <div id="upload-area" onclick="document.getElementById('file-input').click()"
-       ondragover="event.preventDefault(); this.classList.add('drag-over')"
-       ondragleave="this.classList.remove('drag-over')"
-       ondrop="handleDrop(event)">
-    <span>📄</span>
-    Drop a PDF here<br/>or click to upload
-  </div>
-  <input type="file" id="file-input" accept=".pdf" onchange="uploadFile(this.files[0])"/>
-
-  <div id="upload-status"></div>
-
-  <div id="doc-list">
-    <h3>Indexed Documents</h3>
-    <div id="doc-items"></div>
-  </div>
-
-  <div id="metrics-panel">
-    <h3>Usage Stats</h3>
-    <div class="metric-row">Questions asked <span id="m-questions">—</span></div>
-    <div class="metric-row">Avg response time <span id="m-avg">—</span></div>
-    <div class="metric-row">Errors <span id="m-errors">—</span></div>
-  </div>
-
-  <button class="btn-ghost" onclick="clearSession()">🗑 Clear conversation</button>
-</div>
-
-<!-- Main -->
-<div id="main">
-  <div id="demo-banner">
-    ⚠️ <strong>Demo notice:</strong> This is a portfolio project running on a free AWS server (1GB RAM).
-    The AI chat requires a 4GB+ server to run. To try the full app locally:
-    clone the <a href="https://github.com/issa89ai/doc-bot" target="_blank" style="color:#7c8cf8">GitHub repo</a>,
-    install <a href="https://ollama.ai" target="_blank" style="color:#7c8cf8">Ollama</a>, and run <code>uvicorn main:app</code>.
-  </div>
-
-  <div id="chat-header">
-    <h2>Chat</h2>
-    <span id="session-label">Session: default</span>
-  </div>
-
-  <div id="messages">
-    <div id="empty-state">
-      <span>💬</span>
-      <p>Upload a PDF and start asking questions</p>
-    </div>
-  </div>
-
-  <div id="input-bar">
-    <textarea id="question-input" placeholder="Ask something about your documents..."
-              onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); sendMessage();}"></textarea>
-    <button id="send-btn" onclick="sendMessage()">Send</button>
-  </div>
-</div>
-
-<script>
-  const API_KEY = "docbot-secret-123";
-  const sessionId = "session_" + Math.random().toString(36).slice(2, 8);
-  document.getElementById("session-label").textContent = "Session: " + sessionId;
-
-  async function uploadFile(file) {
-    if (!file) return;
-    const status = document.getElementById("upload-status");
-    status.textContent = "Uploading " + file.name + "...";
-
-    const fd = new FormData();
-    fd.append("file", file);
-
-    const res = await fetch("/upload", { method: "POST", body: fd, headers: { "X-API-Key": API_KEY } });
-    const data = await res.json();
-
-    if (res.ok) {
-      status.textContent = "✓ " + data.message + " (" + data.chunks_indexed + " chunks)";
-      loadDocs();
-    } else {
-      status.textContent = "✗ " + (data.detail || "Upload failed");
-    }
-  }
-
-  function handleDrop(e) {
-    e.preventDefault();
-    document.getElementById("upload-area").classList.remove("drag-over");
-    const file = e.dataTransfer.files[0];
-    if (file) uploadFile(file);
-  }
-
-  async function loadDocs() {
-    const res = await fetch("/documents");
-    const data = await res.json();
-    const container = document.getElementById("doc-items");
-    container.innerHTML = data.documents.length
-      ? data.documents.map(d => `
-          <div class="doc-item">
-            <input type="checkbox" value="${d}" checked style="margin-right:6px;accent-color:#7c8cf8"/>
-            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📄 ${d}</span>
-            <button onclick="deleteDoc('${d}')" title="Delete" style="background:none;border:none;color:#555;cursor:pointer;font-size:0.85rem;padding:0 2px;flex-shrink:0">🗑</button>
-          </div>`).join("")
-      : `<p style="color:#444; font-size:0.78rem;">No documents yet</p>`;
-  }
-
-  async function deleteDoc(filename) {
-    if (!confirm("Delete " + filename + "?")) return;
-    await fetch("/documents/" + encodeURIComponent(filename), {
-      method: "DELETE",
-      headers: { "X-API-Key": API_KEY }
-    });
-    loadDocs();
-  }
-
-  function getSelectedDocs() {
-    return [...document.querySelectorAll("#doc-items input:checked")].map(cb => cb.value);
-  }
-
-  function addMessage(role, text, sources) {
-    const empty = document.getElementById("empty-state");
-    if (empty) empty.remove();
-
-    const box = document.getElementById("messages");
-    const div = document.createElement("div");
-    div.className = "msg " + role;
-    div.textContent = text;
-
-    if (sources && sources.length) {
-      const s = document.createElement("div");
-      s.className = "sources";
-      s.textContent = "Sources: " + sources.join(", ");
-      div.appendChild(s);
-    }
-
-    box.appendChild(div);
-    box.scrollTop = box.scrollHeight;
-    return div;
-  }
-
-  async function sendMessage() {
-    const input = document.getElementById("question-input");
-    const question = input.value.trim();
-    if (!question) return;
-
-    input.value = "";
-    input.style.height = "48px";
-    document.getElementById("send-btn").disabled = true;
-
-    addMessage("user", question);
-    const thinking = addMessage("thinking", "Thinking...");
-
-    const res = await fetch("/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": API_KEY },
-      body: JSON.stringify({ question, session_id: sessionId, selected_docs: getSelectedDocs() }),
-    });
-
-    thinking.remove();
-    document.getElementById("send-btn").disabled = false;
-
-    if (res.ok) {
-      const data = await res.json();
-      addMessage("bot", data.answer, data.sources);
-    } else {
-      const err = await res.json();
-      addMessage("bot", "Error: " + (err.detail || "Something went wrong."));
-    }
-  }
-
-  async function clearSession() {
-    await fetch("/session/" + sessionId, { method: "DELETE" });
-    document.getElementById("messages").innerHTML =
-      `<div id="empty-state" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#333;gap:8px;pointer-events:none">
-        <span style="font-size:2.5rem">💬</span>
-        <p style="font-size:0.9rem">Upload a PDF and start asking questions</p>
-      </div>`;
-  }
-
-  async function loadMetrics() {
-    const res = await fetch("/metrics");
-    const d = await res.json();
-    document.getElementById("m-questions").textContent = d.total_questions;
-    document.getElementById("m-avg").textContent = d.average_response_time_s + "s";
-    document.getElementById("m-errors").textContent = d.errors;
-  }
-
-  loadDocs();
-  loadMetrics();
-  setInterval(loadMetrics, 10000);
-</script>
-</body>
-</html>
-"""
+@app.get("/metrics", dependencies=[Depends(require_api_key)])
+def get_metrics():
+    with lock:
+        total = metrics["total_questions"]
+        return {"total_questions": total, "errors": metrics["errors"],
+                "average_response_time_s": round(metrics["total_response_time"] / total, 2) if total else 0}

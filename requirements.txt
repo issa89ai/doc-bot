@@ -7,5 +7,6 @@ langchain-chroma
 langchain-ollama
 chromadb
 pypdf
+pypdfium2>=4,<6
 boto3
 python-dotenv

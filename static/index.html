@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Doc-Bot</title><link rel="stylesheet" href="/static/style.css"><script src="/static/app.js?v=keyboard-2" defer></script></head>
+<body>
+<aside>
+  <h1>Doc-Bot</h1><p>Your documents. Clear answers.</p>
+  <form id="connect-form"><label for="api-key">Private API key</label><input id="api-key" type="password" autocomplete="off" required minlength="32"><button>Connect</button></form>
+  <p class="muted">Key stays in this tab's memory. Use HTTPS outside localhost.</p>
+  <label for="file-input">Upload PDF (up to 10 MB)</label><input id="file-input" type="file" accept=".pdf" disabled>
+  <p id="status" role="status" aria-live="polite">Connect to manage documents.</p>
+  <h2>Documents</h2><div id="doc-items"></div>
+  <button id="clear-btn" disabled>Clear conversation</button>
+</aside>
+<main><header><h2>Ask your documents</h2><p>Answers use retrieved excerpts, and may still contain mistakes. Check the sources.</p></header>
+<section id="messages" role="log" aria-live="polite"><p class="muted">Connect, upload a PDF, then ask a question.</p></section>
+<p class="composer-hint" id="keyboard-hint">Enter to send · Shift+Enter for a new line</p>
+<form id="chat-form"><label class="sr-only" for="question">Question</label><textarea id="question" aria-describedby="keyboard-hint" maxlength="4000" rows="2" placeholder="Ask about your documents…" required></textarea><button id="send-btn" disabled>Send</button></form>
+</main></body></html>

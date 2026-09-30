@@ -1,232 +1,170 @@
-# Doc-Bot — RAG-Powered Document Chatbot
+# Doc-Bot
 
-A production-deployed AI assistant that lets you upload PDFs and chat with them using a full Retrieval-Augmented Generation (RAG) pipeline. Built end-to-end as an 8-week ML/AI Engineer portfolio project.
+A single-owner PDF assistant built with FastAPI, LangChain, ChromaDB and Ollama.
+Includes a separate scikit-learn / MLflow learning exercise.
 
-**Live:** http://18.227.122.170:8000
+See [Development and evaluation record](PROGRESS.md) for failures, improvements,
+manual test results (8 receipt + 5 CV checks), and remaining limitations.
 
----
+**Status:** learning project under hardening, not a production-ready public service.
+The previous AWS deployment has not been updated or verified by this repair pass.
+Both indexing and answering require a reachable Ollama server with the models below.
 
-## Architecture
+## Local setup
 
-```
-User Browser
-     │
-     │  HTTP
-     ▼
-FastAPI (EC2 t3.micro, us-east-2)
-     │
-     ├── /upload ──► Local disk + S3 (doc-bot-pdfs-ahmadissa)
-     │
-     └── /chat
-           │
-           ├── ChromaDB (vector store, MMR retrieval)
-           │       └── nomic-embed-text embeddings (Ollama)
-           │
-           └── llama3.2 LLM (Ollama)
-                   └── Strict document-only prompt
+Use Python 3.11 or 3.12 in a virtual environment:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt -r requirements-dev.txt
+Copy-Item .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-**Deployment pipeline:**
-```
-git push → GitHub Actions → SSH into EC2 → git pull → docker build → docker run
-```
+If `.env` already exists, **do not overwrite it**: edit its settings locally instead.
+Put the generated secret in `API_KEY` locally. Never paste it into chat or commit it.
+The server refuses missing or weak keys. AWS credentials are not required for local use;
+leave `S3_BUCKET` blank to disable backups.
 
----
+Start Ollama and install both models:
 
-## Tech Stack
-
-| Layer | Tool |
-|---|---|
-| LLM | Llama 3.2 via Ollama (runs locally, free) |
-| Embeddings | nomic-embed-text via Ollama |
-| Vector Store | ChromaDB |
-| Retrieval | MMR (Maximal Marginal Relevance, k=6, fetch_k=20) |
-| Framework | LangChain |
-| API | FastAPI + Pydantic |
-| UI | Embedded dark-theme HTML/CSS/JS (mobile-responsive) |
-| Container | Docker (multi-stage build) |
-| Cloud | AWS EC2 + S3 + IAM + Elastic IP |
-| CI/CD | GitHub Actions (auto-deploy on every push) |
-| ML Tracking | MLflow (14 experiment runs, SQLite backend) |
-
----
-
-## Features
-
-- Upload PDFs via drag & drop or file picker
-- Ask questions in plain English — answers cite exact page numbers
-- Session-based conversation memory (last 3 turns)
-- Strict document-only answers — refuses to answer from outside knowledge
-- Every uploaded PDF backed up to AWS S3
-- `/metrics` endpoint tracks questions, response times, errors
-- API key authentication on all write endpoints
-- Auto-deploys on every GitHub push via CI/CD
-
----
-
-## Project Structure
-
-```
-doc-bot/
-├── main.py                          # FastAPI app — REST endpoints + embedded chat UI
-├── rag.py                           # RAG logic — load, index, retrieve, answer
-├── chatbot.py                       # CLI version of the chatbot
-├── train.py                         # MLflow experiment tracking (14 runs)
-├── Dockerfile                       # Multi-stage Docker build
-├── docker-compose.yml               # Local development setup
-├── requirements.txt
-├── .github/workflows/deploy.yml     # GitHub Actions CI/CD pipeline
-├── docs/                            # PDF storage (gitignored)
-├── chroma_db/                       # Vector store (gitignored)
-└── mlflow.db                        # MLflow SQLite backend (gitignored)
-```
-
----
-
-## API Endpoints
-
-| Method | Endpoint | Auth | Description |
-|---|---|---|---|
-| `GET` | `/` | No | Chat UI |
-| `POST` | `/upload` | Yes | Upload and index a PDF |
-| `POST` | `/chat` | Yes | Ask a question |
-| `GET` | `/documents` | No | List indexed documents |
-| `DELETE` | `/session/{id}` | No | Clear conversation history |
-| `GET` | `/metrics` | No | Usage stats |
-| `GET` | `/health` | No | Health check |
-| `GET` | `/docs` | No | Swagger API docs |
-
-**Authentication:** Pass `X-API-Key: docbot-secret-123` header on upload and chat requests.
-
----
-
-## Local Setup
-
-### 1. Install Ollama and pull models
-```bash
-# Download from https://ollama.ai
+```text
 ollama pull llama3.2
 ollama pull nomic-embed-text
-```
-
-### 2. Clone and install dependencies
-```bash
-git clone https://github.com/issa89ai/doc-bot.git
-cd doc-bot
-pip install -r requirements.txt
-```
-
-### 3. Run the API
-```bash
 python -m uvicorn main:app --reload
 ```
 
-### 4. Open the chat UI
-Go to `http://localhost:8000`
+Open http://localhost:8000 and enter your API key. It stays in tab memory, not browser
+storage. Connect, upload a text PDF, select documents, and ask a question. Scanned
+image-only PDFs need OCR (not implemented). Maximum upload: 10 MB. Filenames must
+use letters, numbers, spaces, dots, parentheses, dashes or underscores.
 
-### Docker (alternative)
-```bash
-docker-compose up
+The frontend requires HTTPS outside localhost. Do not send credentials to a public HTTP URL.
+The owner key grants access to all documents; this is **not multi-user authentication**.
+
+## Organization
+
+| File | Responsibility |
+| --- | --- |
+| `main.py` | Authenticated API, request limits, bounded in-memory sessions |
+| `rag.py` | Shared PDF indexing, retrieval and model calls |
+| `exact_fields.py` | Conservative comparisons of labeled identifiers and single-item receipt tables |
+| `storage.py` | Optional S3 backup and deletion using boto3's credential chain |
+| `static/` | HTML, responsive CSS and browser JavaScript |
+| `chatbot.py` | CLI using the shared RAG module |
+| `train.py` | Classifier comparison and MLflow logging |
+| `tests/` | Local regression tests using mocked external services |
+| `.github/workflows/ci.yml` | Test-and-build CI; no AWS deployment |
+
+Use one API worker. Do not run the CLI against the same Chroma store while the API
+is running. Sessions and metrics reset on restart. Document files and vectors persist.
+
+## API
+
+All routes below except `/`, `/static/*`, `/health` and API documentation require
+the `X-API-Key` header. No server secret is embedded in the frontend.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /upload` | Validate, index and optionally back up a PDF |
+| `POST /chat` | Answer a question; requires `question` and `session_id` |
+| `GET /documents` | List filenames present in the vector index |
+| `DELETE /documents/{filename}` | Remove cloud copy, index entries and local PDF |
+| `DELETE /session/{session_id}` | Clear conversation |
+| `GET /metrics` | In-memory usage metrics |
+| `GET /health` | Process liveness only |
+| `GET /ready` | Check Ollama model inventory and Chroma access |
+
+Omit `selected_docs` to query all documents; an explicit empty list is rejected.
+Source labels identify retrieved pages, not proof that every generated claim is correct.
+Document-only prompts reduce unsupported answers but do not guarantee correctness or
+provide complete protection against prompt injection.
+
+PDFs containing broken Unicode mappings are retried with PDFium rather than
+guessing missing characters. Existing uploads must be re-uploaded to refresh
+their indexed text after this extraction change. Supported single-item receipt
+tables and invoice/receipt-number comparisons use deterministic code; other
+layouts still use the model and require evaluation. These narrow helpers do not
+establish reliability for arbitrary financial documents.
+
+Re-uploading replaces the document's previous chunks after new embeddings succeed.
+Failed embeddings preserve the old document. Filesystem and vector updates are not a
+cross-system transaction; crash recovery and multi-process writes remain future work.
+S3 backup failures return `backup_status: failed`, not a false backup success.
+Cloud deletion failures retain the local document for retry. Versioned S3 buckets can
+retain old versions after deletion; lifecycle/version cleanup is an AWS policy decision.
+
+## Docker
+
+```text
+docker compose up --build
 ```
 
----
+The Compose setup targets Ollama on your host computer. It passes `API_KEY`, `S3_BUCKET`
+and `AWS_REGION`, and bind-mounts `docs/` and `chroma_db/`. It does not launch Ollama or
+automatically pass host AWS credentials into the container. For the first local test,
+leave S3 disabled. Configure cloud credentials through an appropriate role/profile separately.
 
-## MLflow Experiment Tracking
+## Tests and training
 
-Trained a 4-class topic classifier on the 20 Newsgroups dataset (sci.med, sci.space, rec.sport.hockey, talk.politics.guns) with 14 tracked runs:
-
-| Model | Accuracy |
-|---|---|
-| NaiveBayes (alpha=0.5) | 91.26% — best |
-| LinearSVC bigrams | 90.8% |
-| LogisticRegression bigrams | 90.4% |
-| LinearSVC | 89.9% |
-| LogisticRegression C=1.0 | 89.1% |
-| LogisticRegression C=0.1 | 85.3% |
-
-```bash
+```text
+python -m pytest -q
+python -m pip install -r requirements-training.txt
 python train.py
-mlflow ui --backend-store-uri sqlite:///mlflow.db
-# Open http://localhost:5000
+python -m mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
----
+Default tests mock AI and AWS calls; they do not establish cloud or model availability.
+Set `RUN_OLLAMA_TESTS=1` to enable the synthetic local-model grounding checks.
+For private end-to-end evaluation, run
+`python scripts/evaluate_receipt.py PATH_TO_PDF PATH_TO_PRIVATE_CASES_JSON`.
+The runner exercises upload, extraction, embeddings, retrieval, and chat using local
+Ollama and an ephemeral index (no AWS). Add `--isolated` for separate sessions.
+Keep cases and generated results under the ignored `tmp/` directory, never in Git.
+After updating the extractor, restart the app and re-upload older PDFs: existing
+saved chunks are not automatically rewritten. Corrupted retrieved text now prompts
+re-upload rather than returning unreliable extracted fields.
+Training uses a stratified 60/20/20 train/validation/test split. Six model configurations
+and eight alpha settings are compared on validation data. The selected configuration is
+refit on train+validation, then evaluated once on the held-out test set (a 15th run).
+Do not keep tuning based on the test score. Old test-tuned results are historical learning
+results, not an unbiased final evaluation. No new training scores are claimed here.
 
-## AWS Infrastructure
+Dependencies are currently not fully locked. Reproducible dependency locking and a real
+Docker/inference smoke test are still required before release.
 
-| Resource | Details |
-|---|---|
-| EC2 | t3.micro, Amazon Linux 2023, us-east-2 |
-| Elastic IP | 18.227.122.170 (permanent) |
-| S3 Bucket | doc-bot-pdfs-ahmadissa (us-east-2) |
-| IAM User | doc-bot-app (AmazonS3FullAccess) |
-| Security Group | Ports 22 (SSH), 8000 (app) |
+## AWS deployment safety gates
 
----
+Automatic deployment is disabled in the repository changes. CI tests/builds only.
+Before re-enabling deployment:
 
-## Weekly Progress
+1. Replace exposed AWS access keys and the SSH private key. Verify replacement access
+   before removing the old SSH public key from EC2 `authorized_keys`. Update GitHub secrets.
+2. Prefer a bucket-scoped IAM instance role to static AWS access keys. Restrict IAM
+   permissions to the required bucket/prefix, not `AmazonS3FullAccess`.
+3. Configure HTTPS and restrict direct port 8000 access. Set a reverse-proxy body-size
+   limit and request-rate limits (application limits alone are not sufficient).
+4. Configure a reachable Ollama service and enough memory, then test upload and chat.
+5. Build a candidate image before replacing a running container; verify readiness and
+   provide rollback. The old stop-before-build workflow was removed.
+6. Verify billing in AWS. Do not assume EC2, disks or Elastic IPs are free.
 
-### Week 1 — First RAG App
-- PDF loading with LangChain `PyPDFLoader`
-- Text splitting (1000 chars / 100 overlap)
-- ChromaDB vector store + nomic-embed-text embeddings
-- **Deliverable:** CLI chatbot (`chatbot.py`)
+No AWS resources or credentials are changed by these local repairs. Cloud operation,
+HTTPS, credential rotation, backup restore and billing must be checked separately.
 
-### Week 2 — Vector DB & RAG Deep Dive
-- Multi-document support
-- MMR retrieval (fetch 20, return 6 diverse results)
-- Conversation history (last 3 turns)
-- Source citations with filename + page number
-- **Deliverable:** Multi-doc CLI chatbot with memory
+## Roadmap progress
 
-### Week 3 — REST API & Chat UI
-- FastAPI backend with 7 endpoints
-- Session-based conversation history
-- Embedded dark-theme chat UI with drag & drop
-- API key authentication
-- **Deliverable:** `localhost:8000` chat interface
+The original [8-week roadmap](ML_AI_Engineer_Roadmap.md) is retained as a learning plan.
+Its historical pricing/free-tier notes are not reliable current billing guidance.
 
-### Week 4 — Docker
-- Multi-stage Dockerfile (builder → slim runtime)
-- docker-compose with volume mounts
-- OLLAMA_HOST env var for Docker → host Ollama bridge
-- **Deliverable:** `docker-compose up` spins up everything
-
-### Week 5 — MLOps & Experiment Tracking
-- 14 MLflow runs across 3 model families
-- NaiveBayes alpha hyperparameter sweep (8 runs)
-- Best: NaiveBayes alpha=0.5 → 91.26% accuracy
-- **Deliverable:** MLflow dashboard with metric charts
-
-### Week 6 — Cloud Deployment (AWS)
-- S3 bucket for PDF backup on every upload
-- EC2 t3.micro deployment with Docker
-- **Deliverable:** App live at http://18.227.122.170:8000
-
-### Week 7 — CI/CD Pipeline
-- GitHub Actions workflow: push → SSH → rebuild → redeploy
-- Elastic IP for permanent fixed address
-- Docker `--restart always` for auto-start on boot
-- **Deliverable:** Push code → deployed in ~15 seconds automatically
-
-### Week 8 — Monitoring & Polish
-- Strict document-only prompt (no hallucination)
-- Request logging to `requests.log`
-- `/metrics` endpoint: total questions, avg response time, errors
-- **Deliverable:** Production-hardened, monitored, polished repo
-
----
-
-## Skills Demonstrated
-
-| Skill | Where |
-|---|---|
-| Python | Throughout |
-| LangChain / RAG / LLMs | Weeks 1–2, rag.py |
-| Vector databases (ChromaDB) | Weeks 1–2 |
-| FastAPI / REST APIs | Week 3, main.py |
-| Docker | Week 4, Dockerfile |
-| Scikit-learn / MLflow | Week 5, train.py |
-| AWS (EC2, S3, IAM) | Week 6 |
-| CI/CD (GitHub Actions) | Week 7 |
-| Monitoring / Observability | Week 8 |
+| Stage | Actual status |
+| --- | --- |
+| 1: PDF chatbot | Local receipt API evaluation and 13 browser checks passed; broader evaluation pending |
+| 2: Multi-doc retrieval/history | Implemented; Pinecone/hybrid search not implemented |
+| 3: API/auth | Hardened locally; shared owner key, not separate user accounts |
+| 4: Docker/frontend | Docker configuration and responsive custom UI; no separate DB service |
+| 5: MLflow | 14 comparison configurations; corrected evaluation needs rerunning |
+| 6: Cloud | Prior UI deployment; working cloud inference/HTTPS not verified |
+| 7: CI/CD | Test/build CI added; deployment paused; Kubernetes not implemented |
+| 8: Monitoring | Basic metrics only; agents, external monitoring and production hardening incomplete |

@@ -27,8 +27,11 @@ CATEGORIES = ["sci.med", "sci.space", "rec.sport.hockey", "talk.politics.guns"]
 
 print("Loading dataset...")
 data = fetch_20newsgroups(subset="all", categories=CATEGORIES, remove=("headers", "footers", "quotes"))
-X_train, X_test, y_train, y_test = train_test_split(
-    data.data, data.target, test_size=0.2, random_state=42
+X_dev, X_test, y_dev, y_test = train_test_split(
+    data.data, data.target, test_size=0.2, random_state=42, stratify=data.target
+)
+X_train, X_val, y_train, y_val = train_test_split(
+    X_dev, y_dev, test_size=0.25, random_state=42, stratify=y_dev
 )
 print(f"  Train: {len(X_train)} samples | Test: {len(X_test)} samples")
 print(f"  Categories: {CATEGORIES}\n")
@@ -78,6 +81,9 @@ mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("doc-topic-classifier")
 
 results = []
+best_pipeline = None
+best_validation = -1
+best_name = None
 
 for exp in experiments:
     with mlflow.start_run(run_name=exp["name"]):
@@ -92,15 +98,18 @@ for exp in experiments:
         pipeline.fit(X_train, y_train)
 
         # Evaluate
-        y_pred = pipeline.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred, average="weighted")
+        y_pred = pipeline.predict(X_val)
+        accuracy = accuracy_score(y_val, y_pred)
+        f1 = f1_score(y_val, y_pred, average="weighted")
+        mlflow.set_tag("evaluation_split", "validation")
+        if accuracy > best_validation:
+            best_pipeline, best_validation, best_name = pipeline, accuracy, exp["name"]
 
         # Log to MLflow
         mlflow.log_params(exp["params"])
         mlflow.log_metric("accuracy", accuracy)
         mlflow.log_metric("f1_weighted", f1)
-        mlflow.sklearn.log_model(pipeline, artifact_path="model")
+        mlflow.sklearn.log_model(pipeline, name="model")
 
         results.append({
             "run": exp["name"],
@@ -128,16 +137,30 @@ for alpha in alphas:
             ("clf",   MultinomialNB(alpha=alpha)),
         ])
         pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred, average="weighted")
+        y_pred = pipeline.predict(X_val)
+        accuracy = accuracy_score(y_val, y_pred)
+        f1 = f1_score(y_val, y_pred, average="weighted")
+        mlflow.set_tag("evaluation_split", "validation")
+        if accuracy > best_validation:
+            best_pipeline, best_validation, best_name = pipeline, accuracy, f"NaiveBayes-alpha-{alpha}"
 
         mlflow.log_params({"model": "MultinomialNB", "alpha": alpha, "experiment_type": "alpha_tuning"})
         mlflow.log_metric("accuracy", accuracy)
         mlflow.log_metric("f1_weighted", f1)
-        mlflow.sklearn.log_model(pipeline, artifact_path="model")
+        mlflow.sklearn.log_model(pipeline, name="model")
 
         print(f"  alpha={alpha:<6} accuracy={accuracy:.4f}  f1={f1:.4f}")
 
-print("\nRun  'mlflow ui'  then open  http://localhost:5000  to explore all runs.")
-print(f"Total runs logged: {len(experiments) + len(alphas)}")
+# Select using validation only, refit on train+validation, then evaluate once.
+best_pipeline.fit(X_dev, y_dev)
+with mlflow.start_run(run_name="final-held-out-test"):
+    predictions = best_pipeline.predict(X_test)
+    score = accuracy_score(y_test, predictions)
+    mlflow.log_param("selected_model", best_name)
+    mlflow.set_tag("evaluation_split", "test")
+    mlflow.log_metric("test_accuracy", score)
+    mlflow.log_metric("test_f1_weighted", f1_score(y_test, predictions, average="weighted"))
+    mlflow.sklearn.log_model(best_pipeline, name="model")
+    print(f"Final held-out test: {best_name}, accuracy={score:.4f}")
+print("Run python -m mlflow ui --backend-store-uri sqlite:///mlflow.db")
+print("14 validation runs + 1 final held-out test run. Do not tune using the final test score.")

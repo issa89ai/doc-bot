@@ -15,7 +15,8 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application code
-COPY main.py rag.py ./
+COPY main.py rag.py storage.py exact_fields.py ./
+COPY static/ ./static/
 
 # Volumes for persistent data (mounted by docker-compose)
 RUN mkdir -p docs chroma_db

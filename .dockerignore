@@ -6,3 +6,12 @@ __pycache__/
 *.pdf
 .env
 .git
+.venv/
+.claude/
+mlruns/
+mlartifacts/
+*.db*
+*.log
+*.pem
+*.key
+.env.*
