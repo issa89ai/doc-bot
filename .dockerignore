@@ -15,3 +15,5 @@ mlartifacts/
 *.pem
 *.key
 .env.*
+tmp/
+.pytest_cache/

@@ -1,6 +1,6 @@
 # Development and evaluation record
 
-Updated September 29, 2026. This is a learning-project record, not a production
+Updated October 4, 2026. This is a learning-project record, not a production
 certification. Personal PDFs, screenshots, extracted text, credentials, and private
 evaluation outputs are intentionally excluded from Git.
 
@@ -59,6 +59,14 @@ citations; listing both pages does not prove both support each answer.
 
 ## Automated verification
 
+- October 4 Docker verification: fresh image built; isolated Linux container reached
+  host Ollama, rejected unauthenticated requests, indexed a synthetic PDF, answered its
+  known project-code question with the expected page citation, retained the index after
+  container restart, and deleted the test document. Cloud backup was disabled. The
+  disposable container was removed; user documents and existing containers were untouched.
+  This tested restart persistence, not volume recovery after container replacement.
+  Reproduce with `python scripts/smoke_docker.py PATH_TO_SYNTHETIC_PDF` after building
+  `doc-bot:local-check`; fixture must contain the project code BLUEBIRD-742.
 - Pre-push run on September 29: 52 Python tests passed, 5 optional live-model tests
   skipped; all 3 JavaScript tests passed.
 - Prior real local-model run: 55 Python tests passed at that revision.
@@ -77,8 +85,8 @@ citations; listing both pages does not prove both support each answer.
 - No OCR, vision, arbitrary table reasoning, or clinical interpretation.
 - Prompt/history heuristics and narrow deterministic helpers need broader evaluation.
 - No atomic transaction across filesystem and Chroma; use one API worker.
-- Dependencies not fully locked; Docker inference and current cloud deployment remain
-  unverified. No automatic AWS deployment is enabled by this push.
+- Dependencies not fully locked; Docker inference passed the local synthetic smoke test,
+  but current cloud deployment remains unverified. Automatic AWS deployment is disabled.
 - Roadmap gaps: fresh classifier evaluation, broader RAG benchmark, production HTTPS,
   rate limiting, backup recovery validation, Kubernetes, agents, external monitoring.
 - Next: add more independent text-document tests, improve partial-text warnings within

@@ -131,8 +131,10 @@ refit on train+validation, then evaluated once on the held-out test set (a 15th 
 Do not keep tuning based on the test score. Old test-tuned results are historical learning
 results, not an unbiased final evaluation. No new training scores are claimed here.
 
-Dependencies are currently not fully locked. Reproducible dependency locking and a real
-Docker/inference smoke test are still required before release.
+Dependencies are currently not fully locked. On October 4, 2026, an isolated Docker
+smoke test passed upload, host Ollama inference, source citation, restart persistence,
+authentication, and deletion. See `scripts/smoke_docker.py` and PROGRESS.md. This does
+not verify cloud deployment or data recovery after container replacement.
 
 ## AWS deployment safety gates
 
