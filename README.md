@@ -2,9 +2,17 @@
 
 A single-owner PDF assistant built with FastAPI, LangChain, ChromaDB and Ollama.
 Focused on retrieval-augmented generation (RAG) for selectable-text PDFs.
-The unrelated classifier-training exercise has been extracted into the independent
-[Text Topic Classifier](https://github.com/issa89ai/text-topic-classifier) project;
-it is not part of the chatbot pipeline.
+
+## Scope and architecture
+
+PDF upload -> text extraction -> chunks -> embeddings -> Chroma retrieval ->
+Llama answer with retrieved-page labels.
+
+This repository owns the PDF interface, API, document storage, retrieval pipeline,
+and RAG evaluation. It does not train topic classifiers or require a training
+repository, MLflow database, or shared model artifacts. Its runtime dependencies
+are declared in `requirements.txt`; test dependencies are in `requirements-dev.txt`.
+Use a dedicated virtual environment for this application.
 
 See [Development and evaluation record](PROGRESS.md) for failures, improvements,
 manual test results (8 receipt + 5 CV checks), and remaining limitations.
@@ -154,15 +162,14 @@ HTTPS, credential rotation, backup restore and billing must be checked separatel
 
 ## RAG application progress
 
-The original broad learning roadmap remains in Git history. This repository now
-documents only the PDF assistant; classifier experiments have their own project.
+Progress below refers only to the PDF assistant, not a broader learning syllabus.
 
-| Stage | Actual status |
+| Component | Actual status |
 | --- | --- |
-| 1: PDF chatbot | Local receipt API evaluation and 13 browser checks passed; broader evaluation pending |
-| 2: Multi-doc retrieval/history | Implemented; Pinecone/hybrid search not implemented |
-| 3: API/auth | Hardened locally; shared owner key, not separate user accounts |
-| 4: Docker/frontend | Docker configuration and responsive custom UI; no separate DB service |
-| 6: Cloud | Prior UI deployment; working cloud inference/HTTPS not verified |
-| 7: CI/CD | Test/build CI added; deployment paused; Kubernetes not implemented |
-| 8: Monitoring | Basic metrics only; agents, external monitoring and production hardening incomplete |
+| PDF chatbot | Local receipt API evaluation and 13 browser checks passed; broader evaluation pending |
+| Multi-doc retrieval/history | Implemented; Pinecone/hybrid search not implemented |
+| API/auth | Hardened locally; shared owner key, not separate user accounts |
+| Docker/frontend | Docker configuration and responsive custom UI; no separate DB service |
+| Cloud | Prior UI deployment; working cloud inference/HTTPS not verified |
+| CI/CD | Test/build CI added; deployment paused; Kubernetes not implemented |
+| Monitoring | Basic metrics only; agents, external monitoring and production hardening incomplete |

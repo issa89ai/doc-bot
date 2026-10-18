@@ -6,6 +6,11 @@ evaluation outputs are intentionally excluded from Git.
 
 ## Scope and completed work
 
+- Independence audit: runtime code, dependency manifests, Docker inputs and CI do
+  not reference the classifier repository. The README describes only this app's
+  architecture and setup. Historical extraction notes below are provenance, not
+  an installation requirement or shared runtime dependency. Legacy MLflow ignore
+  rules remain intentionally to prevent accidentally publishing old local artifacts.
 - Shared RAG module for the CLI and FastAPI; local Ollama generation and embeddings,
   persistent Chroma index, MMR retrieval, document selection, and retrieved-page labels.
 - Custom HTML/CSS/JavaScript frontend separated from backend code. Responsive styling,
