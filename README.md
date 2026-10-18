@@ -1,7 +1,10 @@
 # Doc-Bot
 
 A single-owner PDF assistant built with FastAPI, LangChain, ChromaDB and Ollama.
-Includes a separate scikit-learn / MLflow learning exercise.
+Focused on retrieval-augmented generation (RAG) for selectable-text PDFs.
+The unrelated classifier-training exercise has been extracted into the independent
+[Text Topic Classifier](https://github.com/issa89ai/text-topic-classifier) project;
+it is not part of the chatbot pipeline.
 
 See [Development and evaluation record](PROGRESS.md) for failures, improvements,
 manual test results (8 receipt + 5 CV checks), and remaining limitations.
@@ -53,7 +56,6 @@ The owner key grants access to all documents; this is **not multi-user authentic
 | `storage.py` | Optional S3 backup and deletion using boto3's credential chain |
 | `static/` | HTML, responsive CSS and browser JavaScript |
 | `chatbot.py` | CLI using the shared RAG module |
-| `train.py` | Classifier comparison and MLflow logging |
 | `tests/` | Local regression tests using mocked external services |
 | `.github/workflows/ci.yml` | Test-and-build CI; no AWS deployment |
 
@@ -106,13 +108,11 @@ and `AWS_REGION`, and bind-mounts `docs/` and `chroma_db/`. It does not launch O
 automatically pass host AWS credentials into the container. For the first local test,
 leave S3 disabled. Configure cloud credentials through an appropriate role/profile separately.
 
-## Tests and training
+## Tests and evaluation
 
 ```text
 python -m pytest -q
-python -m pip install -r requirements-training.txt
-python train.py
-python -m mlflow ui --backend-store-uri sqlite:///mlflow.db
+node --test tests/frontend.test.cjs
 ```
 
 Default tests mock AI and AWS calls; they do not establish cloud or model availability.
@@ -125,11 +125,8 @@ Keep cases and generated results under the ignored `tmp/` directory, never in Gi
 After updating the extractor, restart the app and re-upload older PDFs: existing
 saved chunks are not automatically rewritten. Corrupted retrieved text now prompts
 re-upload rather than returning unreliable extracted fields.
-Training uses a stratified 60/20/20 train/validation/test split. Six model configurations
-and eight alpha settings are compared on validation data. The selected configuration is
-refit on train+validation, then evaluated once on the held-out test set (a 15th run).
-Do not keep tuning based on the test score. Old test-tuned results are historical learning
-results, not an unbiased final evaluation. No new training scores are claimed here.
+Doc-Bot uses pretrained generation and embedding models through Ollama. Uploading
+PDFs builds a retrieval index; it does not train or fine-tune model weights.
 
 Dependencies are currently not fully locked. On October 4, 2026, an isolated Docker
 smoke test passed upload, host Ollama inference, source citation, restart persistence,
@@ -155,10 +152,10 @@ Before re-enabling deployment:
 No AWS resources or credentials are changed by these local repairs. Cloud operation,
 HTTPS, credential rotation, backup restore and billing must be checked separately.
 
-## Roadmap progress
+## RAG application progress
 
-The original [8-week roadmap](ML_AI_Engineer_Roadmap.md) is retained as a learning plan.
-Its historical pricing/free-tier notes are not reliable current billing guidance.
+The original broad learning roadmap remains in Git history. This repository now
+documents only the PDF assistant; classifier experiments have their own project.
 
 | Stage | Actual status |
 | --- | --- |
@@ -166,7 +163,6 @@ Its historical pricing/free-tier notes are not reliable current billing guidance
 | 2: Multi-doc retrieval/history | Implemented; Pinecone/hybrid search not implemented |
 | 3: API/auth | Hardened locally; shared owner key, not separate user accounts |
 | 4: Docker/frontend | Docker configuration and responsive custom UI; no separate DB service |
-| 5: MLflow | 14 comparison configurations; corrected evaluation needs rerunning |
 | 6: Cloud | Prior UI deployment; working cloud inference/HTTPS not verified |
 | 7: CI/CD | Test/build CI added; deployment paused; Kubernetes not implemented |
 | 8: Monitoring | Basic metrics only; agents, external monitoring and production hardening incomplete |

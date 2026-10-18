@@ -1,6 +1,6 @@
 # Development and evaluation record
 
-Updated October 4, 2026. This is a learning-project record, not a production
+Updated October 17, 2026. This is a learning-project record, not a production
 certification. Personal PDFs, screenshots, extracted text, credentials, and private
 evaluation outputs are intentionally excluded from Git.
 
@@ -15,10 +15,12 @@ evaluation outputs are intentionally excluded from Git.
 - Optional S3 backup through the standard credential chain. Local use needs no AWS keys.
   Backup failures are visible; cloud deletion failure preserves the local document.
 - Docker configuration and test/build CI. Automatic cloud deployment is disabled.
-- Separate scikit-learn/MLflow exercise: six model configurations and eight Naive Bayes
-  alpha settings. Revised training code uses stratified train/validation/test splitting,
-  validation-based selection, and one final held-out evaluation. Revised scores have
-  not been rerun or claimed. These classifiers do not train the chatbot's language model.
+- October 17: extracted the unrelated classifier exercise into the independent
+  [text-topic-classifier](https://github.com/issa89ai/text-topic-classifier) project,
+  including standalone dependencies, tests, CI,
+  documentation, and local MLflow history. Removed training entry points and the
+  broad learning roadmap from Doc-Bot; originals remain in Git history/local backups.
+  No chatbot model weights or PDF indexing behavior were changed by this separation.
 - User-confirmed scope: selectable-text PDFs. OCR, scanned forms, checkmark interpretation,
   and image understanding are out of scope for now.
 
@@ -26,7 +28,7 @@ evaluation outputs are intentionally excluded from Git.
 
 | Failure or limitation observed | Change or decision | Evidence / remaining caveat |
 | --- | --- | --- |
-| Earlier training category was unavailable; Windows output encoding failed; MLflow filesystem tracking was deprecated | Corrected dataset category, ASCII console output, SQLite tracking | Historical fixes; current training results still need a fresh run |
+| Unrelated classifier training obscured the PDF assistant's purpose | Extracted into a standalone project | Training history and results documented there; no classifier is used in RAG |
 | Credentials and SSH material were exposed during development | Strong local key, ignored secret files, removal of local static AWS credentials, deployment disabled | User showed old IAM key inactive and removed SSH secret; no claim of complete account-wide security audit |
 | Embedded/default frontend key was unsafe | Key entered privately and retained only in tab memory; HTTPS required outside localhost | Authentication tests; single-owner, not multi-user authorization |
 | Receipt currency guessed from dollar symbol/payment method | Explicit grounding rules forbid unsupported currency inference | Browser check correctly abstained |
@@ -59,6 +61,13 @@ citations; listing both pages does not prove both support each answer.
 
 ## Automated verification
 
+- October 17 separation: 52 Doc-Bot Python tests passed, 5 optional live-Ollama
+  tests skipped, and all 3 JavaScript tests passed. The first sandboxed Python
+  attempt could not create temporary folders; rerunning with normal access passed.
+  The classifier's 3 synthetic tests passed. All 35 historical MLflow runs were
+  preserved, SQLite integrity verified, and the relocated final model loaded and
+  predicted a space example successfully. No new full training run was performed.
+  Local originals are recoverable under ignored `tmp/classifier-migration/`.
 - October 4 Docker verification: fresh image built; isolated Linux container reached
   host Ollama, rejected unauthenticated requests, indexed a synthetic PDF, answered its
   known project-code question with the expected page citation, retained the index after
@@ -87,7 +96,7 @@ citations; listing both pages does not prove both support each answer.
 - No atomic transaction across filesystem and Chroma; use one API worker.
 - Dependencies not fully locked; Docker inference passed the local synthetic smoke test,
   but current cloud deployment remains unverified. Automatic AWS deployment is disabled.
-- Roadmap gaps: fresh classifier evaluation, broader RAG benchmark, production HTTPS,
+- Roadmap gaps: broader RAG benchmark, production HTTPS,
   rate limiting, backup recovery validation, Kubernetes, agents, external monitoring.
-- Next: add more independent text-document tests, improve partial-text warnings within
-  the chosen scope, and verify Docker locally before any cloud deployment.
+- Next: add more independent text-document tests and improve partial-text warnings
+  within the chosen scope. The October 4 Docker check does not verify cloud deployment.
